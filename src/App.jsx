@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   ShoppingCart, Plus, Minus, Check, Coffee, FileText, X, 
   UtensilsCrossed, Receipt, ChevronRight, History, 
-  Archive, Settings, Store, Clock, Save, Trash2, Database
+  Archive, Settings, Store, Clock, Save, Trash2, Database,
+  Wifi, WifiOff, Loader
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { menuCategories as defaultMenu } from './data';
+import { supabase } from './supabaseClient';
 import './index.css';
 
 function App() {
@@ -17,6 +19,11 @@ function App() {
   
   const [showReport, setShowReport] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+
+  // Supabase durumu
+  const [isLoading, setIsLoading] = useState(true);
+  const [isOnline, setIsOnline] = useState(true);
+  const isInitialized = useRef(false); // İlk yüklemede kayıt yapmasını engelle
 
   // Hoşgeldin Ekranı (Splash Screen) State
   const [showSplash, setShowSplash] = useState(true);
@@ -83,52 +90,79 @@ function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Initialization
+  // =============================================
+  // SUPABASE: Veri Yükleme (İlk Açılış)
+  // =============================================
   useEffect(() => {
-    const savedMenu = localStorage.getItem('kafana-gore-menu');
-    if (savedMenu) {
-      // Merge: eski localStorage'daki menüyü data.js'deki tüm yeni zengin alanlarla güncelle!
-      const parsed = JSON.parse(savedMenu);
-      const merged = parsed.map(cat => {
-        const defaultCat = defaultMenu.find(dc => dc.category === cat.category);
-        if (!defaultCat) return cat;
-        return {
-          ...cat,
-          items: cat.items.map(item => {
-            const defaultItem = defaultCat.items.find(di => di.id === item.id);
-            if (defaultItem) {
-              return { 
-                ...item, 
-                image: defaultItem.image, 
-                name: defaultItem.name,
-                description: item.description !== undefined ? item.description : (defaultItem.description || ""),
-                extras: item.extras !== undefined ? item.extras : (defaultItem.extras || []),
-                active: item.active !== undefined ? item.active : (defaultItem.active !== undefined ? defaultItem.active : true),
-                chefRecommend: item.chefRecommend !== undefined ? item.chefRecommend : (defaultItem.chefRecommend || false),
-                vegan: item.vegan !== undefined ? item.vegan : (defaultItem.vegan || false),
-                spicy: item.spicy !== undefined ? item.spicy : (defaultItem.spicy || false),
-                hasAllergen: item.hasAllergen !== undefined ? item.hasAllergen : (defaultItem.hasAllergen || false)
-              };
-            }
-            return item;
-          })
-        };
-      });
-      setMenuCategories(merged);
-      localStorage.setItem('kafana-gore-menu', JSON.stringify(merged));
-    } else {
-      setMenuCategories(defaultMenu);
-    }
+    const loadFromSupabase = async () => {
+      setIsLoading(true);
+      try {
+        // 1) Menüyü yükle
+        const { data: menuData, error: menuErr } = await supabase
+          .from('kafana_gore_menu')
+          .select('data')
+          .eq('id', 'main')
+          .single();
 
-    const savedCurrentOrders = localStorage.getItem('kafana-gore-current-orders');
-    if (savedCurrentOrders) {
-      setCurrentDayOrders(JSON.parse(savedCurrentOrders));
-    }
+        if (menuErr && menuErr.code !== 'PGRST116') throw menuErr;
 
-    const savedArchives = localStorage.getItem('kafana-gore-archives');
-    if (savedArchives) {
-      setArchives(JSON.parse(savedArchives));
-    }
+        if (menuData?.data) {
+          setMenuCategories(menuData.data);
+        } else {
+          // İlk açılış: varsayılan menüyü Supabase'e kaydet
+          await supabase.from('kafana_gore_menu').upsert({ id: 'main', data: defaultMenu });
+          setMenuCategories(defaultMenu);
+        }
+
+        // 2) Güncel siparişleri yükle
+        const { data: ordersData, error: ordersErr } = await supabase
+          .from('kafana_gore_orders')
+          .select('*')
+          .order('created_at', { ascending: true });
+
+        if (ordersErr) throw ordersErr;
+        if (ordersData) {
+          const orders = ordersData.map(o => ({
+            id: o.id,
+            time: o.time,
+            items: o.items,
+            discount: o.discount,
+            total: o.total
+          }));
+          setCurrentDayOrders(orders);
+        }
+
+        // 3) Arşivleri yükle
+        const { data: archData, error: archErr } = await supabase
+          .from('kafana_gore_archives')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (archErr) throw archErr;
+        if (archData) {
+          const arcs = archData.map(a => ({ id: a.id, ...a.data }));
+          setArchives(arcs);
+        }
+
+        setIsOnline(true);
+      } catch (err) {
+        console.error('Supabase yükleme hatası:', err);
+        setIsOnline(false);
+        showToast('Bağlantı hatası! Yerel veri kullanılıyor.');
+        // Yedek: localStorage
+        const savedMenu = localStorage.getItem('kafana-gore-menu');
+        setMenuCategories(savedMenu ? JSON.parse(savedMenu) : defaultMenu);
+        const savedOrders = localStorage.getItem('kafana-gore-current-orders');
+        if (savedOrders) setCurrentDayOrders(JSON.parse(savedOrders));
+        const savedArchives = localStorage.getItem('kafana-gore-archives');
+        if (savedArchives) setArchives(JSON.parse(savedArchives));
+      } finally {
+        setIsLoading(false);
+        isInitialized.current = true;
+      }
+    };
+
+    loadFromSupabase();
   }, []);
 
   useEffect(() => {
@@ -137,13 +171,25 @@ function App() {
     }
   }, [menuCategories]);
 
-  // Save changes to localStorage
+  // =============================================
+  // SUPABASE: Menü değişince buluta kaydet
+  // =============================================
   useEffect(() => {
-    if (menuCategories.length > 0) {
-      localStorage.setItem('kafana-gore-menu', JSON.stringify(menuCategories));
-    }
+    if (!isInitialized.current || menuCategories.length === 0) return;
+    const saveMenu = async () => {
+      try {
+        await supabase.from('kafana_gore_menu').upsert({ id: 'main', data: menuCategories, updated_at: new Date().toISOString() });
+        // Yerel yedek
+        localStorage.setItem('kafana-gore-menu', JSON.stringify(menuCategories));
+      } catch (err) {
+        console.error('Menü kaydetme hatası:', err);
+      }
+    };
+    const timer = setTimeout(saveMenu, 800); // 800ms debounce
+    return () => clearTimeout(timer);
   }, [menuCategories]);
 
+  // Yerel yedek
   useEffect(() => {
     localStorage.setItem('kafana-gore-current-orders', JSON.stringify(currentDayOrders));
   }, [currentDayOrders]);
@@ -215,7 +261,7 @@ function App() {
   const currentTotal = orderItems.reduce((sum, item) => sum + (item.unitPrice || item.price) * item.qty, 0);
   const finalTotal = Math.max(0, currentTotal - discount);
 
-  const saveOrder = () => {
+  const saveOrder = async () => {
     if (orderItems.length === 0) return;
     
     const newOrder = {
@@ -226,9 +272,22 @@ function App() {
       total: finalTotal
     };
 
+    // Supabase'e kaydet
+    try {
+      await supabase.from('kafana_gore_orders').insert({
+        id: newOrder.id,
+        time: newOrder.time,
+        items: newOrder.items,
+        discount: newOrder.discount,
+        total: newOrder.total
+      });
+    } catch (err) {
+      console.error('Sipariş kaydedilemedi:', err);
+    }
+
     setCurrentDayOrders((prev) => [...prev, newOrder]);
     setOrderItems([]);
-    setDiscount(0); // Sipariş tamamlanınca indirimi sıfırla
+    setDiscount(0);
     showToast('Sipariş başarıyla kaydedildi!');
   };
 
@@ -278,7 +337,7 @@ function App() {
     setShowReport(true);
   };
 
-  const finalizeDay = () => {
+  const finalizeDay = async () => {
     if (currentDayOrders.length === 0) {
       alert("Bugün hiç sipariş yok. Günü bitiremezsiniz.");
       return;
@@ -286,13 +345,26 @@ function App() {
 
     if (confirm("Günü bitirip arşive kaydetmek istediğinize emin misiniz? Güncel siparişler sıfırlanacaktır.")) {
       const summaryData = generateDailySummary();
+      const archiveId = Date.now().toString();
       
       const newArchive = {
-        id: Date.now().toString(),
+        id: archiveId,
         date: new Date().toLocaleDateString('tr-TR'),
         ...summaryData,
         ordersCount: currentDayOrders.length
       };
+
+      // Supabase'e arşiv kaydet + siparişleri sil
+      try {
+        await supabase.from('kafana_gore_archives').insert({
+          id: archiveId,
+          date: newArchive.date,
+          data: newArchive
+        });
+        await supabase.from('kafana_gore_orders').delete().neq('id', 'NONE');
+      } catch (err) {
+        console.error('Arşivleme hatası:', err);
+      }
 
       setArchives(prev => [newArchive, ...prev]);
       setCurrentDayOrders([]);
@@ -1036,6 +1108,22 @@ function App() {
   return (
     <>
       <div id="root">
+        {/* Yükleniyor Ekranı */}
+        <AnimatePresence>
+          {isLoading && (
+            <motion.div
+              initial={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(255,255,255,0.92)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}
+            >
+              <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}>
+                <Loader size={48} color="#ea580c" />
+              </motion.div>
+              <p style={{ color: '#ea580c', fontWeight: '800', fontSize: '1.2rem' }}>Veriler yükleniyor...</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <motion.div 
           initial={{ y: -50, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
@@ -1043,6 +1131,11 @@ function App() {
           className="header-container glass-panel"
         >
           <h1><Coffee size={44} color="#ea580c" /> Kafana Göre Kahvaltı</h1>
+          {/* Bağlantı Durumu */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', fontWeight: '700', color: isOnline ? '#10b981' : '#ef4444', background: isOnline ? '#d1fae5' : '#fee2e2', padding: '4px 12px', borderRadius: '20px', marginBottom: '0.5rem' }}>
+            {isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}
+            {isOnline ? 'Bulut Bağlı' : 'Çevrimdışı'}
+          </div>
           
           <div className="nav-tabs">
             {['pos', 'menu', 'orders', 'archive', 'settings'].map(tab => {
