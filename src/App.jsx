@@ -98,21 +98,14 @@ function App() {
   const [newItemDescription, setNewItemDescription] = useState('');
   const [newItemImage, setNewItemImage] = useState('');
 
-  // Arayuz Tema Ayarlari
-  const [themeColor1, setThemeColor1] = useState('#ea580c');
-  const [themeColor2, setThemeColor2] = useState('#f59e0b');
+  // Arayuz Tema Ayarlari (1. Renk Cam Gobegi, 2. Renk Mavi)
+  const [themeColor1, setThemeColor1] = useState('#06b6d4'); 
+  const [themeColor2, setThemeColor2] = useState('#2563eb'); 
   const [autoCycle, setAutoCycle] = useState(false);
   const [themeSaving, setThemeSaving] = useState(false);
-  
-  // Ek Arayuz Ayarlari
-  const [fontFamily, setFontFamily] = useState('Outfit');
-  const [borderRadius, setBorderRadius] = useState('12px');
-  const [themeMode, setThemeMode] = useState('light');
-  const [bgStyle, setBgStyle] = useState('gradient');
-  
   const cycleRef = useRef(null);
 
-  // Tema renkleri ve ek arayuz ayarlari degisince CSS degiskenlerini guncelle
+  // Tema renkleri degisince CSS degiskenlerini guncelle
   useEffect(() => {
     document.documentElement.style.setProperty('--color-primary', themeColor1);
     document.documentElement.style.setProperty('--color-accent', themeColor2);
@@ -121,23 +114,14 @@ function App() {
     document.documentElement.style.setProperty('--color-bg1', themeColor1 + '55');
     document.documentElement.style.setProperty('--color-bg2', themeColor2 + '55');
     
-    // Ek arayüz ayarlarını CSS değişkenlerine aktar
-    document.documentElement.style.setProperty('--font-family', fontFamily);
-    document.documentElement.style.setProperty('--radius', borderRadius);
-    
-    // Tema Modu (Aydinlik / Karanlik Cam Efekti)
-    if (themeMode === 'dark') {
-      document.documentElement.style.setProperty('--glass-bg', 'rgba(15, 23, 42, 0.75)');
-      document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.1)');
-      document.documentElement.style.setProperty('--text-main', '#f8fafc');
-      document.documentElement.style.setProperty('--text-muted', '#cbd5e1');
-    } else {
-      document.documentElement.style.setProperty('--glass-bg', 'rgba(255, 255, 255, 0.65)');
-      document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.5)');
-      document.documentElement.style.setProperty('--text-main', '#1e293b');
-      document.documentElement.style.setProperty('--text-muted', '#475569');
-    }
-  }, [themeColor1, themeColor2, fontFamily, borderRadius, themeMode]);
+    // Varsayilan arayüz degiskenleri
+    document.documentElement.style.setProperty('--font-family', "'Outfit', sans-serif");
+    document.documentElement.style.setProperty('--radius', '12px');
+    document.documentElement.style.setProperty('--glass-bg', 'rgba(255, 255, 255, 0.65)');
+    document.documentElement.style.setProperty('--glass-border', 'rgba(255, 255, 255, 0.5)');
+    document.documentElement.style.setProperty('--text-main', '#1e293b');
+    document.documentElement.style.setProperty('--text-muted', '#475569');
+  }, [themeColor1, themeColor2]);
 
   // Otomatik renk dongusu
   useEffect(() => {
@@ -233,13 +217,8 @@ function App() {
           .single();
 
         if (settingsData) {
-          if (settingsData.theme_color1) setThemeColor1(settingsData.theme_color1);
-          if (settingsData.theme_color2) setThemeColor2(settingsData.theme_color2);
+          // Renkler kodda sabitlenmistir, sadece auto_cycle yuklenir
           if (settingsData.auto_cycle !== undefined) setAutoCycle(settingsData.auto_cycle);
-          if (settingsData.font_family) setFontFamily(settingsData.font_family);
-          if (settingsData.border_radius) setBorderRadius(settingsData.border_radius);
-          if (settingsData.theme_mode) setThemeMode(settingsData.theme_mode);
-          if (settingsData.bg_style) setBgStyle(settingsData.bg_style);
         }
 
         setIsOnline(true);
@@ -1181,30 +1160,13 @@ function App() {
   const saveThemeSettings = async () => {
     setThemeSaving(true);
     try {
-      // Once tum kolonlari kaydetmeyi dene
-      const { error } = await supabase.from('kafana_gore_settings').upsert({
+      await supabase.from('kafana_gore_settings').upsert({
         id: 'main',
-        theme_color1: themeColor1,
-        theme_color2: themeColor2,
+        theme_color1: '#06b6d4',
+        theme_color2: '#2563eb',
         auto_cycle: autoCycle,
-        font_family: fontFamily,
-        border_radius: borderRadius,
-        theme_mode: themeMode,
-        bg_style: bgStyle,
         updated_at: new Date().toISOString()
       });
-      
-      if (error) {
-        console.warn('Yeni kolonlar eksik olabilir, sadece temel renkler kaydediliyor:', error.message);
-        // Fallback: Eski kolonları kaydet
-        await supabase.from('kafana_gore_settings').upsert({
-          id: 'main',
-          theme_color1: themeColor1,
-          theme_color2: themeColor2,
-          auto_cycle: autoCycle,
-          updated_at: new Date().toISOString()
-        });
-      }
       showToast('Tema ayarlari kaydedildi!');
     } catch (err) {
       console.error('Tema kaydetme hatası:', err);
@@ -1227,190 +1189,27 @@ function App() {
       </div>
 
       {/* ── Arayüz Tema Ayarları ── */}
-      <div className="settings-category" style={{ marginBottom: '2rem', background: 'linear-gradient(135deg, rgba(234,88,12,0.08), rgba(245,158,11,0.08))', border: '1px solid rgba(234,88,12,0.2)' }}>
-        <h3 style={{ border: 'none', marginBottom: '1.25rem', color: '#ea580c', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          Arayuz Tema Ayarlari
+      {/* ── Arayüz Tema Ayarları ── */}
+      <div className="settings-category" style={{ marginBottom: '2rem', background: 'linear-gradient(135deg, rgba(6,182,212,0.08), rgba(37,99,235,0.08))', border: '1px solid rgba(6,182,212,0.2)' }}>
+        <h3 style={{ border: 'none', marginBottom: '1rem', color: '#06b6d4', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          Otomatik Renk Donusumu
         </h3>
-
-        {/* Hazır Tema Şablonları Gridi */}
-        <div style={{ marginBottom: '1.5rem' }}>
-          <label style={{ fontSize: '0.95rem', fontWeight: '800', color: '#374151', display: 'block', marginBottom: '0.75rem' }}>
-            Hazır Tema Şablonları
-          </label>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))',
-            gap: '0.75rem'
-          }}>
-            {[
-              { name: 'Sıcak Turuncu', color1: '#ea580c', color2: '#f59e0b' },
-              { name: 'Orman Yeşili', color1: '#16a34a', color2: '#4ade80' },
-              { name: 'Derin Mavi', color1: '#1d4ed8', color2: '#3b82f6' },
-              { name: 'Gece Moru', colorMor: '#7c3aed', color1: '#7c3aed', color2: '#c084fc' },
-              { name: 'Gül Pembesi', color1: '#db2777', color2: '#f472b6' },
-              { name: 'Retro Kahve', color1: '#78350f', color2: '#d97706' },
-              { name: 'Asil Gri', color1: '#374151', color2: '#9ca3af' },
-              { name: 'Vahşi Kırmızı', color1: '#dc2626', color2: '#f87171' }
-            ].map(p => (
-              <button
-                key={p.name}
-                type="button"
-                onClick={() => {
-                  setThemeColor1(p.color1);
-                  setThemeColor2(p.color2);
-                }}
-                style={{
-                  padding: '6px',
-                  borderRadius: '10px',
-                  border: (themeColor1 === p.color1 && themeColor2 === p.color2) ? `2.5px solid ${themeColor1}` : '2.5px solid transparent',
-                  background: 'white',
-                  boxShadow: '0 4px 10px rgba(0,0,0,0.05)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '4px',
-                  transition: 'all 0.2s ease',
-                  transform: (themeColor1 === p.color1 && themeColor2 === p.color2) ? 'scale(1.03)' : 'scale(1)'
-                }}
-              >
-                <div style={{
-                  width: '100%',
-                  height: '42px',
-                  borderRadius: '6px',
-                  display: 'flex',
-                  overflow: 'hidden',
-                  border: '1px solid rgba(0,0,0,0.08)'
-                }}>
-                  <div style={{ flex: 1, background: p.color1 }} title={`Ana Renk: ${p.color1}`}></div>
-                  <div style={{ flex: 1, background: p.color2 }} title={`Vurgu Rengi: ${p.color2}`}></div>
-                </div>
-                <span style={{ fontSize: '0.75rem', fontWeight: '800', color: '#1e293b' }}>{p.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.25rem' }}>
-          {/* Tema Rengi 1 */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <label style={{ fontSize: '0.9rem', fontWeight: '700', color: '#374151' }}>Tema Rengi 1 (Ana Renk)</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'white', borderRadius: '10px', padding: '0.5rem 0.75rem', border: '1px solid #e5e7eb' }}>
-              <input
-                type="color"
-                value={themeColor1}
-                onChange={e => setThemeColor1(e.target.value)}
-                style={{ width: '40px', height: '40px', border: 'none', borderRadius: '6px', cursor: 'pointer', background: 'transparent' }}
-              />
-              <div>
-                <div style={{ fontSize: '0.85rem', fontWeight: '600', color: '#1e293b' }}>{themeColor1.toUpperCase()}</div>
-                <div style={{ width: '80px', height: '8px', borderRadius: '4px', background: themeColor1, marginTop: '4px' }}></div>
-              </div>
-            </div>
-          </div>
-          {/* Tema Rengi 2 */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <label style={{ fontSize: '0.9rem', fontWeight: '700', color: '#374151' }}>Tema Rengi 2 (Vurgu Rengi)</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'white', borderRadius: '10px', padding: '0.5rem 0.75rem', border: '1px solid #e5e7eb' }}>
-              <input
-                type="color"
-                value={themeColor2}
-                onChange={e => setThemeColor2(e.target.value)}
-                style={{ width: '40px', height: '40px', border: 'none', borderRadius: '6px', cursor: 'pointer', background: 'transparent' }}
-              />
-              <div>
-                <div style={{ fontSize: '0.85rem', fontWeight: '600', color: '#1e293b' }}>{themeColor2.toUpperCase()}</div>
-                <div style={{ width: '80px', height: '8px', borderRadius: '4px', background: themeColor2, marginTop: '4px' }}></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Ek Arayüz Detay Ayarları ── */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '1rem',
-          background: 'rgba(255,255,255,0.4)',
-          padding: '1rem',
-          borderRadius: '12px',
-          border: '1px dashed rgba(234,88,12,0.25)',
-          marginBottom: '1.25rem'
-        }}>
-          {/* Yazı Tipi */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-            <label style={{ fontSize: '0.8rem', fontWeight: '800', color: '#475569' }}>Yazı Tipi (Font)</label>
-            <select
-              value={fontFamily}
-              onChange={e => setFontFamily(e.target.value)}
-              style={{
-                padding: '0.5rem', borderRadius: '8px', border: '1px solid #cbd5e1',
-                fontSize: '0.85rem', fontWeight: '700', color: '#1e293b', background: 'white'
-              }}
-            >
-              <option value="'Outfit', sans-serif">Outfit (Modern)</option>
-              <option value="'Inter', sans-serif">Inter (Sade / Minimal)</option>
-              <option value="'Poppins', sans-serif">Poppins (Yuvarlak Hatlar)</option>
-              <option value="system-ui, sans-serif">Sistem Yazı Tipi</option>
-            </select>
-          </div>
-
-          {/* Yuvarlaklık */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-            <label style={{ fontSize: '0.8rem', fontWeight: '800', color: '#475569' }}>Buton Köşe Keskinliği</label>
-            <select
-              value={borderRadius}
-              onChange={e => setBorderRadius(e.target.value)}
-              style={{
-                padding: '0.5rem', borderRadius: '8px', border: '1px solid #cbd5e1',
-                fontSize: '0.85rem', fontWeight: '700', color: '#1e293b', background: 'white'
-              }}
-            >
-              <option value="4px">Keskin Kenarlar (4px)</option>
-              <option value="8px">Hafif Yumuşak (8px)</option>
-              <option value="12px">Standart Oval (12px)</option>
-              <option value="20px">Modern Yuvarlak (20px)</option>
-            </select>
-          </div>
-
-          {/* Tema Modu */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-            <label style={{ fontSize: '0.8rem', fontWeight: '800', color: '#475569' }}>Cam Teması (Glassmorphism)</label>
-            <select
-              value={themeMode}
-              onChange={e => setThemeMode(e.target.value)}
-              style={{
-                padding: '0.5rem', borderRadius: '8px', border: '1px solid #cbd5e1',
-                fontSize: '0.85rem', fontWeight: '700', color: '#1e293b', background: 'white'
-              }}
-            >
-              <option value="light">Aydınlık Cam Teması</option>
-              <option value="dark">Karanlık Cam Teması</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Önizleme */}
-        <div style={{ marginBottom: '1.25rem', padding: '0.75rem', background: 'white', borderRadius: '10px', border: '1px solid #e5e7eb' }}>
-          <div style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '0.5rem', fontWeight: '600' }}>Seçili Renk Önizlemesi:</div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <div style={{ flex: 1, height: '34px', borderRadius: borderRadius, background: `linear-gradient(135deg, ${themeColor1}, ${themeColor2})` }}></div>
-            <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: '700' }}>Gradient Önizleme</span>
-          </div>
-        </div>
+        <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1.25rem', fontWeight: '500' }}>
+          Sistem renkleri <strong>Cam Göbeği</strong> ve <strong>Mavi</strong> olarak sabitlenmiştir. Aşağıdaki seçeneği aktif ederek menüde bu iki renk arasında yumuşak geçişli otomatik bir döngü başlatabilirsiniz.
+        </p>
 
         {/* Otomatik Değiştirme Toggle */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem', background: 'white', borderRadius: '10px', border: '1px solid #e5e7eb', marginBottom: '1.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', background: 'white', borderRadius: '10px', border: '1px solid #e5e7eb', marginBottom: '1.25rem' }}>
           <div>
-            <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#1e293b' }}>Otomatik Renk Degistirme</div>
-            <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '2px' }}>Menüde renkler otomatik dönüşüm yapar</div>
+            <div style={{ fontSize: '0.9rem', fontWeight: '800', color: '#1e293b' }}>Otomatik Renk Dongusu</div>
+            <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '2px' }}>Renkler 4 saniyede bir yumuşak geçiş yapar</div>
           </div>
           <button
             type="button"
             onClick={() => setAutoCycle(!autoCycle)}
             style={{
               width: '52px', height: '28px', borderRadius: '14px', border: 'none', cursor: 'pointer',
-              background: autoCycle ? themeColor1 : '#cbd5e1',
+              background: autoCycle ? '#06b6d4' : '#cbd5e1',
               position: 'relative', transition: 'background 0.3s'
             }}
           >
@@ -1431,13 +1230,13 @@ function App() {
           disabled={themeSaving}
           style={{
             width: '100%', padding: '0.85rem', fontSize: '1rem', fontWeight: '800',
-            border: 'none', borderRadius: borderRadius, cursor: themeSaving ? 'not-allowed' : 'pointer',
-            background: `linear-gradient(135deg, ${themeColor1}, ${themeColor2})`,
+            border: 'none', borderRadius: '12px', cursor: themeSaving ? 'not-allowed' : 'pointer',
+            background: 'linear-gradient(135deg, #06b6d4, #2563eb)',
             color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-            boxShadow: `0 4px 15px ${themeColor1}40`
+            boxShadow: '0 4px 15px rgba(6,182,212,0.3)'
           }}
         >
-          <Save size={18} /> {themeSaving ? 'Kaydediliyor...' : 'Tema Ayarlarını Kaydet & Menüye Uygula'}
+          <Save size={18} /> {themeSaving ? 'Kaydediliyor...' : 'Otomatik Renk Ayarını Kaydet'}
         </motion.button>
       </div>
       
