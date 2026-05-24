@@ -1,5 +1,26 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
 
+@property --color-primary {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #ea580c;
+}
+@property --color-accent {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #f59e0b;
+}
+@property --color-bg1 {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #fef08a;
+}
+@property --color-bg2 {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #fcd34d;
+}
+
 :root {
   --text-main: #1e293b;
   --text-muted: #475569;
@@ -44,6 +65,7 @@ body {
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  transition: background-color 1.5s ease, color 1.5s ease, --color-primary 1.5s ease, --color-accent 1.5s ease, --color-bg1 1.5s ease, --color-bg2 1.5s ease;
 }
 
 
