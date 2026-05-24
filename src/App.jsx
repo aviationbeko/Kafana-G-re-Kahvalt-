@@ -98,6 +98,12 @@ function App() {
   const [newItemDescription, setNewItemDescription] = useState('');
   const [newItemImage, setNewItemImage] = useState('');
 
+  // Arayüz Tema Ayarları
+  const [themeColor1, setThemeColor1] = useState('#ea580c');
+  const [themeColor2, setThemeColor2] = useState('#f59e0b');
+  const [autoCycle, setAutoCycle] = useState(false);
+  const [themeSaving, setThemeSaving] = useState(false);
+
   // Hoşgeldin Ekranı 3.5 saniye sonra otomatik kapanma zamanlayıcısı
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -160,7 +166,21 @@ function App() {
           setArchives(arcs);
         }
 
+        // 4) Tema ayarlarını yükle
+        const { data: settingsData } = await supabase
+          .from('kafana_gore_settings')
+          .select('*')
+          .eq('id', 'main')
+          .single();
+
+        if (settingsData) {
+          if (settingsData.theme_color1) setThemeColor1(settingsData.theme_color1);
+          if (settingsData.theme_color2) setThemeColor2(settingsData.theme_color2);
+          if (settingsData.auto_cycle !== undefined) setAutoCycle(settingsData.auto_cycle);
+        }
+
         setIsOnline(true);
+
       } catch (err) {
         console.error('Supabase yükleme hatası:', err);
         setIsOnline(false);
@@ -1095,6 +1115,25 @@ function App() {
     );
   };
 
+  const saveThemeSettings = async () => {
+    setThemeSaving(true);
+    try {
+      await supabase.from('kafana_gore_settings').upsert({
+        id: 'main',
+        theme_color1: themeColor1,
+        theme_color2: themeColor2,
+        auto_cycle: autoCycle,
+        updated_at: new Date().toISOString()
+      });
+      showToast('✅ Tema ayarları kaydedildi!');
+    } catch (err) {
+      console.error('Tema kaydetme hatası:', err);
+      showToast('❌ Tema kaydedilemedi!');
+    } finally {
+      setThemeSaving(false);
+    }
+  };
+
   const renderSettings = () => (
     <motion.div 
       key="settings"
@@ -1105,6 +1144,95 @@ function App() {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
         <h2><Settings color="#ea580c" /> Ayarlar & Menü Yönetimi</h2>
+      </div>
+
+      {/* ── Arayüz Tema Ayarları ── */}
+      <div className="settings-category" style={{ marginBottom: '2rem', background: 'linear-gradient(135deg, rgba(234,88,12,0.08), rgba(245,158,11,0.08))', border: '1px solid rgba(234,88,12,0.2)' }}>
+        <h3 style={{ border: 'none', marginBottom: '1.25rem', color: '#ea580c', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          🎨 Arayüz Tema Ayarları
+        </h3>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.25rem' }}>
+          {/* Tema Rengi 1 */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <label style={{ fontSize: '0.9rem', fontWeight: '700', color: '#374151' }}>🎨 Tema Rengi 1 (Ana Renk)</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'white', borderRadius: '10px', padding: '0.5rem 0.75rem', border: '1px solid #e5e7eb' }}>
+              <input
+                type="color"
+                value={themeColor1}
+                onChange={e => setThemeColor1(e.target.value)}
+                style={{ width: '40px', height: '40px', border: 'none', borderRadius: '6px', cursor: 'pointer', background: 'transparent' }}
+              />
+              <div>
+                <div style={{ fontSize: '0.85rem', fontWeight: '600', color: '#1e293b' }}>{themeColor1.toUpperCase()}</div>
+                <div style={{ width: '80px', height: '8px', borderRadius: '4px', background: themeColor1, marginTop: '4px' }}></div>
+              </div>
+            </div>
+          </div>
+          {/* Tema Rengi 2 */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <label style={{ fontSize: '0.9rem', fontWeight: '700', color: '#374151' }}>🎨 Tema Rengi 2 (Vurgu Rengi)</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'white', borderRadius: '10px', padding: '0.5rem 0.75rem', border: '1px solid #e5e7eb' }}>
+              <input
+                type="color"
+                value={themeColor2}
+                onChange={e => setThemeColor2(e.target.value)}
+                style={{ width: '40px', height: '40px', border: 'none', borderRadius: '6px', cursor: 'pointer', background: 'transparent' }}
+              />
+              <div>
+                <div style={{ fontSize: '0.85rem', fontWeight: '600', color: '#1e293b' }}>{themeColor2.toUpperCase()}</div>
+                <div style={{ width: '80px', height: '8px', borderRadius: '4px', background: themeColor2, marginTop: '4px' }}></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Önizleme */}
+        <div style={{ marginBottom: '1.25rem', padding: '0.75rem', background: 'white', borderRadius: '10px', border: '1px solid #e5e7eb' }}>
+          <div style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '0.5rem', fontWeight: '600' }}>Renk Önizlemesi:</div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div style={{ flex: 1, height: '32px', borderRadius: '8px', background: `linear-gradient(135deg, ${themeColor1}, ${themeColor2})` }}></div>
+            <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Menü & POS gradient</span>
+          </div>
+        </div>
+
+        {/* Otomatik Değiştirme Toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem', background: 'white', borderRadius: '10px', border: '1px solid #e5e7eb', marginBottom: '1.25rem' }}>
+          <div>
+            <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#1e293b' }}>🔄 Otomatik Renk Değiştirme</div>
+            <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '2px' }}>Menüde renkler otomatik dönüşüm yapar</div>
+          </div>
+          <button
+            onClick={() => setAutoCycle(!autoCycle)}
+            style={{
+              width: '52px', height: '28px', borderRadius: '14px', border: 'none', cursor: 'pointer',
+              background: autoCycle ? themeColor1 : '#cbd5e1',
+              position: 'relative', transition: 'background 0.3s'
+            }}
+          >
+            <div style={{
+              width: '22px', height: '22px', borderRadius: '11px', background: 'white',
+              position: 'absolute', top: '3px',
+              left: autoCycle ? '27px' : '3px',
+              transition: 'left 0.3s',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.2)'
+            }}></div>
+          </button>
+        </div>
+
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={saveThemeSettings}
+          disabled={themeSaving}
+          style={{
+            width: '100%', padding: '0.75rem', fontSize: '1rem', fontWeight: '700',
+            border: 'none', borderRadius: '10px', cursor: themeSaving ? 'not-allowed' : 'pointer',
+            background: `linear-gradient(135deg, ${themeColor1}, ${themeColor2})`,
+            color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+          }}
+        >
+          <Save size={18} /> {themeSaving ? 'Kaydediliyor...' : 'Tema Ayarlarını Kaydet & Menüye Uygula'}
+        </motion.button>
       </div>
       
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem' }}>
