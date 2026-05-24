@@ -74,6 +74,22 @@ function App() {
   const [extrasModalItem, setExtrasModalItem] = useState(null);
   const [selectedExtras, setSelectedExtras] = useState([]);
 
+  // Sipariş Düzenleme Modalı
+  const [editingOrder, setEditingOrder] = useState(null);
+  const [editOrderItems, setEditOrderItems] = useState([]);
+  const [editOrderDiscount, setEditOrderDiscount] = useState(0);
+  const [showAddItemToOrder, setShowAddItemToOrder] = useState(false);
+
+  // Arşiv Tarih Filtresi State'leri
+  const [archiveStartDate, setArchiveStartDate] = useState('');
+  const [archiveEndDate, setArchiveEndDate] = useState('');
+
+  // Gider (Gün Sonu Raporu)
+  const [dayExpenses, setDayExpenses] = useState([]);
+  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [newExpenseName, setNewExpenseName] = useState('');
+  const [newExpenseAmount, setNewExpenseAmount] = useState('');
+
   // States for Settings (Adding items)
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newItemCategory, setNewItemCategory] = useState('');
@@ -347,11 +363,15 @@ function App() {
       const summaryData = generateDailySummary();
       const archiveId = Date.now().toString();
       
+      const totalExp = dayExpenses.reduce((s, e) => s + e.amount, 0);
       const newArchive = {
         id: archiveId,
         date: new Date().toLocaleDateString('tr-TR'),
         ...summaryData,
-        ordersCount: currentDayOrders.length
+        ordersCount: currentDayOrders.length,
+        expenses: dayExpenses,
+        totalExpenses: totalExp,
+        netProfit: summaryData.totalRevenue - totalExp
       };
 
       // Supabase'e arşiv kaydet + siparişleri sil
@@ -368,9 +388,218 @@ function App() {
 
       setArchives(prev => [newArchive, ...prev]);
       setCurrentDayOrders([]);
+      setDayExpenses([]); // Giderleri sıfırla
       setShowReport(false);
       showToast('Gün başarıyla arşive kaydedildi.');
     }
+  };
+
+  // =============================================
+  // ARŞİV SİLME
+  // =============================================
+  const deleteArchive = async (archiveId) => {
+    if (!confirm('Bu arşiv kaydını silmek istediğinize emin misiniz?')) return;
+    try {
+      await supabase.from('kafana_gore_archives').delete().eq('id', archiveId);
+    } catch (err) {
+      console.error('Arşiv silme hatası:', err);
+    }
+    setArchives(prev => prev.filter(a => a.id !== archiveId));
+    showToast('Arşiv kaydı silindi.');
+  };
+
+  // =============================================
+  // SİPARİŞ DÜZENLEME
+  // =============================================
+  const openOrderEdit = (order) => {
+    setEditingOrder(order);
+    setEditOrderItems(order.items.map(item => ({ ...item })));
+    setEditOrderDiscount(order.discount || 0);
+    setShowAddItemToOrder(false);
+  };
+
+  const updateEditOrderItemQty = (cartId, delta) => {
+    setEditOrderItems(prev =>
+      prev.map(i => (i.cartId === cartId || i.id === cartId)
+        ? { ...i, qty: Math.max(0, i.qty + delta) }
+        : i
+      ).filter(i => i.qty > 0)
+    );
+  };
+
+  const addItemToEditOrder = (item) => {
+    const cartId = item.id;
+    setEditOrderItems(prev => {
+      const existing = prev.find(i => (i.cartId || i.id) === cartId && (!i.selectedExtras || i.selectedExtras.length === 0));
+      if (existing) {
+        return prev.map(i => (i.cartId || i.id) === cartId ? { ...i, qty: i.qty + 1 } : i);
+      }
+      return [...prev, { ...item, cartId: item.id, selectedExtras: [], unitPrice: item.price, qty: 1 }];
+    });
+    showToast(`${item.name} eklendi`);
+  };
+
+  const saveOrderEdit = async () => {
+    if (!editingOrder) return;
+    if (editOrderItems.length === 0) {
+      if (confirm('Tüm ürünler kaldırıldı. Siparişi tamamen silmek istiyor musunuz?')) {
+        try {
+          await supabase.from('kafana_gore_orders').delete().eq('id', editingOrder.id);
+        } catch (err) { console.error(err); }
+        setCurrentDayOrders(prev => prev.filter(o => o.id !== editingOrder.id));
+        setEditingOrder(null);
+        showToast('Sipariş silindi.');
+      }
+      return;
+    }
+    const discountVal = parseFloat(editOrderDiscount);
+    const finalDiscount = isNaN(discountVal) ? 0 : discountVal;
+
+    const subTotal = editOrderItems.reduce((sum, i) => sum + (i.unitPrice || i.price) * i.qty, 0);
+    const newTotal = Math.max(0, subTotal - finalDiscount);
+
+    const updatedOrder = { 
+      ...editingOrder, 
+      items: editOrderItems, 
+      discount: finalDiscount, 
+      total: newTotal 
+    };
+
+    try {
+      await supabase.from('kafana_gore_orders').update({
+        items: editOrderItems,
+        discount: finalDiscount,
+        total: newTotal
+      }).eq('id', editingOrder.id);
+    } catch (err) { console.error('Sipariş güncelleme hatası:', err); }
+    setCurrentDayOrders(prev => prev.map(o => o.id === editingOrder.id ? updatedOrder : o));
+    setEditingOrder(null);
+    showToast('Sipariş güncellendi.');
+  };
+
+  // =============================================
+  // ARŞİV FİLTRELEME & HESAPLAMA YARDIMCILARI
+  // =============================================
+  const getFilteredArchives = () => {
+    return archives.filter(arc => {
+      if (!arc.date) return true;
+      const parts = arc.date.split('.');
+      if (parts.length !== 3) return true;
+      const arcDateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+      arcDateObj.setHours(0,0,0,0);
+      
+      // Tarihleri UTC uyuşmazlığı yaşamamak için yerel saat diliminde parse eden yardımcı
+      const parseLocalDate = (dateStr) => {
+        if (!dateStr) return null;
+        const p = dateStr.split('-');
+        if (p.length === 3) {
+          return new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+        }
+        return new Date(dateStr);
+      };
+
+      if (archiveStartDate) {
+        const start = parseLocalDate(archiveStartDate);
+        if (start) {
+          start.setHours(0,0,0,0);
+          if (arcDateObj < start) return false;
+        }
+      }
+      
+      if (archiveEndDate) {
+        const end = parseLocalDate(archiveEndDate);
+        if (end) {
+          end.setHours(23,59,59,999);
+          if (arcDateObj > end) return false;
+        }
+      }
+      
+      return true;
+    });
+  };
+
+  const getFilteredArchivesSummary = (filteredList) => {
+    let totalRevenue = 0;
+    let totalExpenses = 0;
+    let totalOrders = 0;
+    let totalItems = 0;
+    
+    filteredList.forEach(arc => {
+      totalRevenue += arc.totalRevenue || 0;
+      totalExpenses += arc.totalExpenses || 0;
+      totalOrders += arc.ordersCount || 0;
+      totalItems += arc.totalItems || 0;
+    });
+    
+    return {
+      totalRevenue,
+      totalExpenses,
+      netProfit: totalRevenue - totalExpenses,
+      totalOrders,
+      totalItems
+    };
+  };
+
+  const setQuickDateRange = (days) => {
+    const end = new Date();
+    const start = new Date();
+    
+    const formatDate = (d) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    if (days === 'yesterday') {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      setArchiveStartDate(formatDate(yesterday));
+      setArchiveEndDate(formatDate(yesterday));
+    } else if (days === 'today') {
+      const today = new Date();
+      setArchiveStartDate(formatDate(today));
+      setArchiveEndDate(formatDate(today));
+    } else {
+      // Gün çıkarma işlemini güvenli yerel tarihler üzerinden yapıyoruz
+      start.setDate(start.getDate() - days);
+      setArchiveStartDate(formatDate(start));
+      setArchiveEndDate(formatDate(end));
+    }
+  };
+
+  // =============================================
+  // GİDER EKLEME
+  // =============================================
+  const addExpense = () => {
+    const amount = parseFloat(newExpenseAmount);
+    if (!newExpenseName.trim() || isNaN(amount) || amount <= 0) {
+      showToast('Lütfen gider adı ve tutarını girin.');
+      return;
+    }
+    setDayExpenses(prev => [...prev, { id: Date.now().toString(), name: newExpenseName.trim(), amount }]);
+    setNewExpenseName('');
+    setNewExpenseAmount('');
+    setShowExpenseForm(false);
+    showToast(`${newExpenseName} gideri eklendi.`);
+  };
+
+  const removeExpense = (id) => {
+    setDayExpenses(prev => prev.filter(e => e.id !== id));
+  };
+
+  const handleAddExpensePrompt = () => {
+    const name = prompt("Gider adı girin (örn. Elektrik Faturası, Manav, Kurye):");
+    if (!name || !name.trim()) return;
+    const amountStr = prompt("Gider tutarını (TL) girin:");
+    if (!amountStr) return;
+    const amount = parseFloat(amountStr);
+    if (isNaN(amount) || amount <= 0) {
+      alert("Lütfen geçerli bir tutar girin.");
+      return;
+    }
+    setDayExpenses(prev => [...prev, { id: Date.now().toString(), name: name.trim(), amount }]);
+    showToast(`${name} gideri eklendi.`);
   };
 
   // Settings Actions
@@ -684,15 +913,26 @@ function App() {
               </div>
               <div className="history-items">
                 {order.items.map(item => (
-                  <div key={item.id} className="history-item">
-                    <span>{item.qty}x {item.name}</span>
-                    <span>{(item.price * item.qty).toFixed(2)} TL</span>
+                  <div key={item.cartId || item.id} className="history-item">
+                    <span>{item.qty}x {item.name}{item.selectedExtras && item.selectedExtras.length > 0 ? ` (+${item.selectedExtras.map(e=>e.name).join(', ')})` : ''}</span>
+                    <span>{((item.unitPrice || item.price) * item.qty).toFixed(2)} TL</span>
                   </div>
                 ))}
               </div>
+              {order.discount > 0 && (
+                <div style={{ fontSize: '0.85rem', color: '#ef4444', padding: '0.25rem 0', textAlign: 'right' }}>İndirim: -{order.discount.toFixed(2)} TL</div>
+              )}
               <div className="history-total">
                 Toplam: {order.total.toFixed(2)} TL
               </div>
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => openOrderEdit(order)}
+                style={{ marginTop: '0.75rem', width: '100%', background: 'linear-gradient(135deg, #f59e0b, #ea580c)', color: 'white', border: 'none', borderRadius: '8px', padding: '0.5rem', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '0.9rem' }}
+              >
+                <Settings size={14} /> Siparişi Düzenle
+              </motion.button>
             </motion.div>
           ))}
         </motion.div>
@@ -700,59 +940,160 @@ function App() {
     </motion.div>
   );
 
-  const renderArchive = () => (
-    <motion.div 
-      key="archive"
-      variants={tabVariants}
-      initial="hidden" animate="show" exit="exit"
-      className="glass-panel"
-      style={{ padding: '2rem' }}
-    >
-      <h2><Archive color="#ea580c" /> Arşivlenmiş Günler</h2>
-      {archives.length === 0 ? (
-        <div className="empty-state">
-          <Archive size={64} opacity={0.3} />
-          <p>Henüz arşive kaldırılmış bir gün yok.</p>
-        </div>
-      ) : (
-        <motion.div variants={containerVariants} initial="hidden" animate="show" className="archive-list">
-          {archives.map(arc => (
-            <motion.div variants={itemVariants} key={arc.id} className="archive-item">
-              <div className="archive-header">
-                <div className="archive-date">{arc.date}</div>
-                <div className="archive-stats">
-                  <span>Sipariş Sayısı: <strong>{arc.ordersCount}</strong></span>
-                  <span>Satılan Ürün: <strong>{arc.totalItems}</strong></span>
-                  <span className="archive-total">Ciro: <strong>{arc.totalRevenue.toFixed(2)} TL</strong></span>
+  const renderArchive = () => {
+    const filteredArcs = getFilteredArchives();
+    const summary = getFilteredArchivesSummary(filteredArcs);
+
+    return (
+      <motion.div 
+        key="archive"
+        variants={tabVariants}
+        initial="hidden" animate="show" exit="exit"
+        className="glass-panel"
+        style={{ padding: '2rem' }}
+      >
+        <h2><Archive color="#ea580c" /> Arşivlenmiş Günler</h2>
+        
+        {archives.length > 0 && (
+          <div style={{ background: 'rgba(255, 255, 255, 0.6)', padding: '1.5rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.7)', marginBottom: '2rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            {/* Tarih Seçiciler ve Hızlı Filtre Butonları */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: '800', color: '#475569' }}>Başlangıç Tarihi</span>
+                  <input 
+                    type="date" 
+                    value={archiveStartDate} 
+                    onChange={e => setArchiveStartDate(e.target.value)} 
+                    style={{ padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontWeight: '700', outline: 'none' }}
+                  />
                 </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: '800', color: '#475569' }}>Bitiş Tarihi</span>
+                  <input 
+                    type="date" 
+                    value={archiveEndDate} 
+                    onChange={e => setArchiveEndDate(e.target.value)} 
+                    style={{ padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontWeight: '700', outline: 'none' }}
+                  />
+                </div>
+                {(archiveStartDate || archiveEndDate) && (
+                  <button 
+                    onClick={() => { setArchiveStartDate(''); setArchiveEndDate(''); }} 
+                    style={{ alignSelf: 'flex-end', padding: '0.5rem 1rem', borderRadius: '8px', border: 'none', background: '#cbd5e1', color: '#334155', fontWeight: '700', fontSize: '0.9rem', cursor: 'pointer' }}
+                  >
+                    Temizle
+                  </button>
+                )}
               </div>
-              
-              <div style={{ marginTop: '1.5rem', overflowX: 'auto' }}>
-                <table className="report-table" style={{ marginBottom: 0 }}>
-                  <thead>
-                    <tr>
-                      <th>Ürün</th>
-                      <th>Adet</th>
-                      <th>Toplam</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {arc.summaryItems.map(item => (
-                      <tr key={item.id}>
-                        <td>{item.name}</td>
-                        <td>{item.qty}</td>
-                        <td>{item.total.toFixed(2)} TL</td>
+
+              {/* Hızlı Seçim Butonları */}
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button onClick={() => setQuickDateRange('yesterday')} style={{ padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid #ea580c', background: 'transparent', color: '#ea580c', fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer' }}>Dün</button>
+                <button onClick={() => setQuickDateRange('today')} style={{ padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid #ea580c', background: 'transparent', color: '#ea580c', fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer' }}>Bugün</button>
+                <button onClick={() => setQuickDateRange(7)} style={{ padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid #ea580c', background: 'transparent', color: '#ea580c', fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer' }}>Geçmiş 7 Gün</button>
+                <button onClick={() => setQuickDateRange(30)} style={{ padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid #ea580c', background: 'transparent', color: '#ea580c', fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer' }}>Geçmiş 30 Gün</button>
+                <button onClick={() => setQuickDateRange(120)} style={{ padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid #ea580c', background: 'transparent', color: '#ea580c', fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer' }}>Geçmiş 120 Gün</button>
+                <button onClick={() => setQuickDateRange(365)} style={{ padding: '0.4rem 0.8rem', borderRadius: '8px', border: 'linear-gradient(135deg, #f59e0b, #ea580c)', background: 'linear-gradient(135deg, #f59e0b, #ea580c)', color: 'white', fontWeight: '800', fontSize: '0.85rem', cursor: 'pointer' }}>Geçmiş 1 Yıl</button>
+              </div>
+            </div>
+
+            {/* Özet İstatistik Paneli */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem', marginTop: '0.5rem' }}>
+              <div style={{ background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)', padding: '1rem', borderRadius: '12px', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#166534' }}>TOPLAM SATILAN (ADET)</span>
+                <span style={{ fontSize: '1.4rem', fontWeight: '900', color: '#14532d' }}>{summary.totalItems} Adet</span>
+              </div>
+              <div style={{ background: 'linear-gradient(135deg, #fef3c7, #fef3c7)', padding: '1rem', borderRadius: '12px', border: '1px solid #fde68a', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#92400e' }}>TOPLAM CİRO</span>
+                <span style={{ fontSize: '1.4rem', fontWeight: '900', color: '#78350f' }}>{summary.totalRevenue.toFixed(2)} TL</span>
+              </div>
+              <div style={{ background: 'linear-gradient(135deg, #fef2f2, #fee2e2)', padding: '1rem', borderRadius: '12px', border: '1px solid #fecaca', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#991b1b' }}>TOPLAM GİDER</span>
+                <span style={{ fontSize: '1.4rem', fontWeight: '900', color: '#7f1d1d' }}>-{summary.totalExpenses.toFixed(2)} TL</span>
+              </div>
+              <div style={{ background: 'linear-gradient(135deg, #ecfdf5, #d1fae5)', padding: '1rem', borderRadius: '12px', border: '1px solid #a7f3d0', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#065f46' }}>NET KÂR</span>
+                <span style={{ fontSize: '1.4rem', fontWeight: '900', color: '#064e3b' }}>{summary.netProfit.toFixed(2)} TL</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {archives.length === 0 ? (
+          <div className="empty-state">
+            <Archive size={64} opacity={0.3} />
+            <p>Henüz arşive kaldırılmış bir gün yok.</p>
+          </div>
+        ) : filteredArcs.length === 0 ? (
+          <div className="empty-state">
+            <Archive size={64} opacity={0.3} />
+            <p>Seçilen tarih aralığında arşivlenmiş gün bulunamadı.</p>
+          </div>
+        ) : (
+          <motion.div variants={containerVariants} initial="hidden" animate="show" className="archive-list">
+            {filteredArcs.map(arc => (
+              <motion.div variants={itemVariants} key={arc.id} className="archive-item">
+                <div className="archive-header">
+                  <div className="archive-date">{arc.date}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                    <div className="archive-stats">
+                      <span>Sipariş: <strong>{arc.ordersCount}</strong></span>
+                      <span>Satılan: <strong>{arc.totalItems}</strong></span>
+                      <span className="archive-total">Ciro: <strong>{arc.totalRevenue.toFixed(2)} TL</strong></span>
+                      {arc.totalExpenses > 0 && <span style={{ color: '#ef4444' }}>Gider: <strong>-{arc.totalExpenses.toFixed(2)} TL</strong></span>}
+                      {arc.netProfit !== undefined && <span style={{ color: '#10b981', fontWeight: '800' }}>Net Kâr: <strong>{arc.netProfit.toFixed(2)} TL</strong></span>}
+                    </div>
+                    <motion.button
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => deleteArchive(arc.id)}
+                      style={{ background: '#fee2e2', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0.4rem 0.8rem', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '700', fontSize: '0.85rem' }}
+                      title="Arşiv Kaydını Sil"
+                    >
+                      <Trash2 size={14} /> Sil
+                    </motion.button>
+                  </div>
+                </div>
+                
+                <div style={{ marginTop: '1.5rem', overflowX: 'auto' }}>
+                  <table className="report-table" style={{ marginBottom: 0 }}>
+                    <thead>
+                      <tr>
+                        <th>Ürün</th>
+                        <th>Adet</th>
+                        <th>Toplam</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </motion.div>
-          ))}
-        </motion.div>
-      )}
-    </motion.div>
-  );
+                    </thead>
+                    <tbody>
+                      {arc.summaryItems.map(item => (
+                        <tr key={item.id}>
+                          <td>{item.name}</td>
+                          <td>{item.qty}</td>
+                          <td>{item.total.toFixed(2)} TL</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {arc.expenses && arc.expenses.length > 0 && (
+                    <div style={{ marginTop: '1rem', background: '#fef2f2', borderRadius: '8px', padding: '0.75rem 1rem' }}>
+                      <div style={{ fontWeight: '800', color: '#ef4444', marginBottom: '0.5rem', fontSize: '0.9rem' }}>📉 Giderler</div>
+                      {arc.expenses.map(exp => (
+                        <div key={exp.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', padding: '2px 0' }}>
+                          <span>{exp.name}</span>
+                          <span style={{ color: '#ef4444', fontWeight: '700' }}>-{exp.amount.toFixed(2)} TL</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+      </motion.div>
+    );
+  };
 
   const renderSettings = () => (
     <motion.div 
@@ -1243,13 +1584,99 @@ function App() {
                     <span>Genel Toplam Net Ciro:</span>
                     <span>{generateDailySummary().totalRevenue.toFixed(2)} TL</span>
                   </div>
+
+                  {/* GİDERLER BÖLÜMÜ */}
+                  <div style={{ marginTop: '1.5rem', background: '#fef2f2', borderRadius: '12px', padding: '1rem 1.25rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                      <span style={{ fontWeight: '800', color: '#ef4444', fontSize: '1rem' }}>📉 Günlük Giderler</span>
+                      <motion.button
+                        whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                        onClick={() => setShowExpenseForm(v => !v)}
+                        style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', padding: '0.3rem 0.8rem', fontWeight: '700', cursor: 'pointer', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <Plus size={14} /> Gider Ekle
+                      </motion.button>
+                    </div>
+
+                    {showExpenseForm && (
+                      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+                        <input
+                          type="text"
+                          placeholder="Gider Adı (örn: Doğalgaz)"
+                          value={newExpenseName}
+                          onChange={e => setNewExpenseName(e.target.value)}
+                          style={{ flex: 2, padding: '0.5rem', borderRadius: '8px', border: '1px solid #fca5a5', fontSize: '0.9rem', minWidth: '140px' }}
+                        />
+                        <input
+                          type="number"
+                          placeholder="Tutar (TL)"
+                          value={newExpenseAmount}
+                          onChange={e => setNewExpenseAmount(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && addExpense()}
+                          style={{ flex: 1, padding: '0.5rem', borderRadius: '8px', border: '1px solid #fca5a5', fontSize: '0.9rem', minWidth: '100px' }}
+                        />
+                        <button onClick={addExpense} style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', padding: '0.5rem 1rem', fontWeight: '700', cursor: 'pointer' }}>Ekle</button>
+                        <button onClick={() => setShowExpenseForm(false)} style={{ background: '#e2e8f0', border: 'none', borderRadius: '8px', padding: '0.5rem', cursor: 'pointer' }}>✕</button>
+                      </div>
+                    )}
+
+                    {dayExpenses.length === 0 ? (
+                      <p style={{ color: '#94a3b8', fontSize: '0.85rem', textAlign: 'center', margin: '0.5rem 0' }}>Henüz gider eklenmedi.</p>
+                    ) : (
+                      dayExpenses.map(exp => (
+                        <div key={exp.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', fontSize: '0.95rem' }}>
+                          <span>{exp.name}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ color: '#ef4444', fontWeight: '700' }}>-{exp.amount.toFixed(2)} TL</span>
+                            <button onClick={() => removeExpense(exp.id)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px' }}><X size={14}/></button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+
+                    {dayExpenses.length > 0 && (
+                      <div style={{ borderTop: '1px solid #fca5a5', marginTop: '0.75rem', paddingTop: '0.75rem', display: 'flex', justifyContent: 'space-between', fontWeight: '800', color: '#ef4444' }}>
+                        <span>Toplam Gider:</span>
+                        <span>-{dayExpenses.reduce((s, e) => s + e.amount, 0).toFixed(2)} TL</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {dayExpenses.length > 0 && (
+                    <div className="report-total" style={{ marginTop: '0.75rem', background: '#d1fae5', color: '#065f46' }}>
+                      <span style={{ fontWeight: '800' }}>Net Kâr (Ciro - Gider):</span>
+                      <span style={{ fontWeight: '900', fontSize: '1.2rem' }}>
+                        {(generateDailySummary().totalRevenue - dayExpenses.reduce((s, e) => s + e.amount, 0)).toFixed(2)} TL
+                      </span>
+                    </div>
+                  )}
                   
-                  <div style={{ display: 'flex', gap: '1rem', marginTop: '2.5rem' }}>
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.95 }} className="btn btn-secondary" onClick={() => setShowReport(false)}>
-                      Geri Dön
+                  <div style={{ display: 'flex', gap: '1rem', marginTop: '2.5rem', flexWrap: 'wrap' }}>
+                    <motion.button 
+                      whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.95 }} 
+                      className="btn btn-secondary" 
+                      style={{ flex: 1, minWidth: '120px' }} 
+                      onClick={() => setShowReport(false)}
+                    >
+                      Vazgeç (Geri Dön)
                     </motion.button>
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.95 }} className="btn btn-success" onClick={finalizeDay}>
-                      <Save size={22} /> Arşive Kaydet & Sıfırla
+                    
+                    <motion.button 
+                      whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.95 }} 
+                      className="btn btn-danger" 
+                      style={{ flex: 1, minWidth: '120px', background: '#ef4444', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }} 
+                      onClick={handleAddExpensePrompt}
+                    >
+                      <Plus size={18} /> Gider Ekle (-)
+                    </motion.button>
+                    
+                    <motion.button 
+                      whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.95 }} 
+                      className="btn btn-success" 
+                      style={{ flex: 1.5, minWidth: '180px' }} 
+                      onClick={finalizeDay}
+                    >
+                      <Save size={22} /> Günü Bitir & Arşivle
                     </motion.button>
                   </div>
                 </>
@@ -1582,6 +2009,108 @@ function App() {
               style={{ maxWidth: '380px', padding: '2.5rem 2rem' }}
             >
               <h1 className="splash-title-brand" style={{ fontSize: '2.6rem', margin: 0, letterSpacing: '-1px' }}>Hoş Geldiniz</h1>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Sipariş Düzenleme Modalı */}
+      <AnimatePresence>
+        {editingOrder && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="modal-overlay" 
+            onClick={() => setEditingOrder(null)}
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.9, y: 20, opacity: 0 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="modal-content" 
+              style={{ maxWidth: '600px' }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="modal-header">
+                <div className="modal-title"><Settings color="#ea580c" size={30} /> Siparişi Düzenle</div>
+                <button className="close-btn" onClick={() => setEditingOrder(null)}><X size={24} /></button>
+              </div>
+
+              <div style={{ marginBottom: '1rem', background: '#f8fafc', padding: '0.75rem 1rem', borderRadius: '8px', color: '#64748b', fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Sipariş Zamanı: <strong>{editingOrder.time}</strong></span>
+                  <span>Mevcut İndirim: <strong>{editingOrder.discount || 0} TL</strong></span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: '700', color: '#475569' }}>İndirim Tutarı Düzenle:</span>
+                  <input 
+                    type="number" 
+                    value={editOrderDiscount} 
+                    onChange={e => setEditOrderDiscount(e.target.value)} 
+                    style={{ width: '90px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontWeight: '700', textAlign: 'center' }}
+                  />
+                  <span style={{ fontSize: '0.85rem', fontWeight: '700' }}>TL</span>
+                </div>
+              </div>
+
+              <div style={{ maxHeight: '300px', overflowY: 'auto', marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {editOrderItems.map((item) => (
+                  <div key={item.cartId || item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f1f5f9', padding: '0.75rem 1rem', borderRadius: '8px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ fontWeight: '700', color: '#1e293b' }}>{item.name}</span>
+                      {item.selectedExtras && item.selectedExtras.length > 0 && (
+                        <span style={{ fontSize: '0.8rem', color: '#ea580c', fontWeight: '700' }}>
+                          +{item.selectedExtras.map(e => e.name).join(', ')}
+                        </span>
+                      )}
+                      <span style={{ fontSize: '0.85rem', color: '#64748b' }}>{(item.unitPrice || item.price).toFixed(2)} TL</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <button className="qty-btn" onClick={() => updateEditOrderItemQty(item.cartId || item.id, -1)}><Minus size={14} /></button>
+                      <span style={{ fontWeight: '700', fontSize: '1rem', width: '24px', textAlign: 'center' }}>{item.qty}</span>
+                      <button className="qty-btn" onClick={() => updateEditOrderItemQty(item.cartId || item.id, 1)}><Plus size={14} /></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Yeni Ürün Ekleme Alanı */}
+              <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '1rem', marginBottom: '1.5rem' }}>
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ width: '100%', fontSize: '0.9rem', padding: '0.5rem', background: '#f8fafc', border: '1px dashed #cbd5e1', color: '#ea580c', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                  onClick={() => setShowAddItemToOrder(v => !v)}
+                >
+                  <Plus size={16} /> {showAddItemToOrder ? 'Ürün Ekleme Listesini Kapat' : 'Siparişe Yeni Ürün Ekle'}
+                </button>
+
+                {showAddItemToOrder && (
+                  <div style={{ marginTop: '0.75rem', maxHeight: '180px', overflowY: 'auto', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', padding: '4px' }}>
+                    {menuCategories.flatMap(c => c.items).filter(i => i.active !== false).map(item => (
+                      <div 
+                        key={item.id} 
+                        onClick={() => addItemToEditOrder(item)}
+                        style={{ padding: '0.5rem', background: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '700', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                      >
+                        <span>{item.name}</span>
+                        <span style={{ color: '#ea580c' }}>{item.price} TL</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #e2e8f0', paddingTop: '1rem', fontWeight: '800', fontSize: '1.1rem', marginBottom: '1.5rem' }}>
+                <span>Yeni Toplam (İndirim Dahil):</span>
+                <span style={{ color: '#ea580c' }}>
+                  {Math.max(0, editOrderItems.reduce((sum, i) => sum + (i.unitPrice || i.price) * i.qty, 0) - (parseFloat(editOrderDiscount) || 0)).toFixed(2)} TL
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <button className="btn btn-secondary" onClick={() => setEditingOrder(null)}>Vazgeç</button>
+                <button className="btn btn-success" onClick={saveOrderEdit}><Save size={20} /> Değişiklikleri Kaydet</button>
+              </div>
             </motion.div>
           </motion.div>
         )}
