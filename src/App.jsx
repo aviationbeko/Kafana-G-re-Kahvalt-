@@ -98,19 +98,53 @@ function App() {
   const [newItemDescription, setNewItemDescription] = useState('');
   const [newItemImage, setNewItemImage] = useState('');
 
-  // Arayüz Tema Ayarları
+  // Arayuz Tema Ayarlari
   const [themeColor1, setThemeColor1] = useState('#ea580c');
   const [themeColor2, setThemeColor2] = useState('#f59e0b');
   const [autoCycle, setAutoCycle] = useState(false);
   const [themeSaving, setThemeSaving] = useState(false);
+  const cycleRef = useRef(null);
 
-  // Hoşgeldin Ekranı 3.5 saniye sonra otomatik kapanma zamanlayıcısı
+  // Tema renkleri degisince CSS degiskenlerini guncelle (arkaplan dahil)
+  useEffect(() => {
+    document.documentElement.style.setProperty('--color-primary', themeColor1);
+    document.documentElement.style.setProperty('--color-accent', themeColor2);
+    // Arkaplan icin hafif acik tonlar uret
+    document.documentElement.style.setProperty('--color-bg1', themeColor1 + '55');
+    document.documentElement.style.setProperty('--color-bg2', themeColor2 + '55');
+  }, [themeColor1, themeColor2]);
+
+  // Otomatik renk dongusu
+  useEffect(() => {
+    if (cycleRef.current) clearInterval(cycleRef.current);
+    if (!autoCycle) return;
+    let swapped = false;
+    cycleRef.current = setInterval(() => {
+      swapped = !swapped;
+      if (swapped) {
+        document.documentElement.style.setProperty('--color-primary', themeColor2);
+        document.documentElement.style.setProperty('--color-accent', themeColor1);
+        document.documentElement.style.setProperty('--color-bg1', themeColor2 + '55');
+        document.documentElement.style.setProperty('--color-bg2', themeColor1 + '55');
+      } else {
+        document.documentElement.style.setProperty('--color-primary', themeColor1);
+        document.documentElement.style.setProperty('--color-accent', themeColor2);
+        document.documentElement.style.setProperty('--color-bg1', themeColor1 + '55');
+        document.documentElement.style.setProperty('--color-bg2', themeColor2 + '55');
+      }
+    }, 4000);
+    return () => clearInterval(cycleRef.current);
+  }, [autoCycle, themeColor1, themeColor2]);
+
+  // Hosgeldin Ekrani 3.5 saniye sonra otomatik kapanma zamanlayicisi
   useEffect(() => {
     const timer = setTimeout(() => {
       setShowSplash(false);
     }, 3500);
     return () => clearTimeout(timer);
   }, []);
+
+
 
   // =============================================
   // SUPABASE: Veri Yükleme (İlk Açılış)
@@ -1125,10 +1159,10 @@ function App() {
         auto_cycle: autoCycle,
         updated_at: new Date().toISOString()
       });
-      showToast('✅ Tema ayarları kaydedildi!');
+      showToast('Tema ayarlari kaydedildi!');
     } catch (err) {
       console.error('Tema kaydetme hatası:', err);
-      showToast('❌ Tema kaydedilemedi!');
+      showToast('Tema kaydedilemedi!');
     } finally {
       setThemeSaving(false);
     }
@@ -1149,12 +1183,12 @@ function App() {
       {/* ── Arayüz Tema Ayarları ── */}
       <div className="settings-category" style={{ marginBottom: '2rem', background: 'linear-gradient(135deg, rgba(234,88,12,0.08), rgba(245,158,11,0.08))', border: '1px solid rgba(234,88,12,0.2)' }}>
         <h3 style={{ border: 'none', marginBottom: '1.25rem', color: '#ea580c', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          🎨 Arayüz Tema Ayarları
+          Arayuz Tema Ayarlari
         </h3>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.25rem' }}>
           {/* Tema Rengi 1 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <label style={{ fontSize: '0.9rem', fontWeight: '700', color: '#374151' }}>🎨 Tema Rengi 1 (Ana Renk)</label>
+            <label style={{ fontSize: '0.9rem', fontWeight: '700', color: '#374151' }}>Tema Rengi 1 (Ana Renk)</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'white', borderRadius: '10px', padding: '0.5rem 0.75rem', border: '1px solid #e5e7eb' }}>
               <input
                 type="color"
@@ -1170,7 +1204,7 @@ function App() {
           </div>
           {/* Tema Rengi 2 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <label style={{ fontSize: '0.9rem', fontWeight: '700', color: '#374151' }}>🎨 Tema Rengi 2 (Vurgu Rengi)</label>
+            <label style={{ fontSize: '0.9rem', fontWeight: '700', color: '#374151' }}>Tema Rengi 2 (Vurgu Rengi)</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'white', borderRadius: '10px', padding: '0.5rem 0.75rem', border: '1px solid #e5e7eb' }}>
               <input
                 type="color"
@@ -1198,7 +1232,7 @@ function App() {
         {/* Otomatik Değiştirme Toggle */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem', background: 'white', borderRadius: '10px', border: '1px solid #e5e7eb', marginBottom: '1.25rem' }}>
           <div>
-            <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#1e293b' }}>🔄 Otomatik Renk Değiştirme</div>
+            <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#1e293b' }}>Otomatik Renk Degistirme</div>
             <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '2px' }}>Menüde renkler otomatik dönüşüm yapar</div>
           </div>
           <button
